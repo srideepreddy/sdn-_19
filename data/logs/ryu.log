@@ -1,0 +1,10 @@
+Traceback (most recent call last):
+  File "/mnt/c/Users/sride/OneDrive/Attachments/Desktop/Desktop/sdn_drl_shareable/controller/ryu_controller.py", line 22, in <module>
+    from ryu.base import app_manager
+  File "/home/deepu/.local/lib/python3.10/site-packages/ryu/base/app_manager.py", line 35, in <module>
+    from ryu.app import wsgi
+  File "/home/deepu/.local/lib/python3.10/site-packages/ryu/app/wsgi.py", line 109, in <module>
+    class _AlreadyHandledResponse(Response):
+  File "/home/deepu/.local/lib/python3.10/site-packages/ryu/app/wsgi.py", line 111, in _AlreadyHandledResponse
+    from eventlet.wsgi import ALREADY_HANDLED
+ImportError: cannot import name 'ALREADY_HANDLED' from 'eventlet.wsgi' (/home/deepu/.local/lib/python3.10/site-packages/eventlet/wsgi.py)

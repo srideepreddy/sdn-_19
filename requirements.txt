@@ -1,0 +1,21 @@
+# SDN DRL Routing — Python Dependencies
+# Install with: pip install -r requirements.txt
+
+# Deep Learning
+torch>=2.0
+numpy>=1.24
+
+# Reinforcement Learning
+gymnasium>=0.28
+
+# Network Simulation & SDN
+ryu>=4.34
+networkx>=3.0
+
+# Visualization
+matplotlib>=3.7
+flask>=3.0
+flasgger>=0.9
+
+# Utilities
+pyyaml>=6.0
