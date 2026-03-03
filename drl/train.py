@@ -1,7 +1,7 @@
 """
 DRL Training Script for SDN Routing.
 
-Trains a DQN agent to learn optimal routing decisions in the SDN
+Trains a SAC agent to learn optimal routing decisions in the SDN
 environment. Supports two modes:
 
     - simulation: Synthetic training without real network (default)
@@ -25,7 +25,7 @@ import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from drl.environment import SDNRoutingEnv
-from drl.dqn_agent import DQNAgent
+from drl.sac_agent import SACAgent
 
 
 # Directories
@@ -38,7 +38,7 @@ def train(args):
     """
     Main training loop.
 
-    1. Creates SDN environment and DQN agent
+    1. Creates SDN environment and SAC agent
     2. Runs episodes with epsilon-greedy exploration
     3. Trains agent with experience replay after each step
     4. Logs progress and saves checkpoints periodically
@@ -67,8 +67,8 @@ def train(args):
 
     print(f"\n[Environment] State dim: {state_dim}, Action dim: {action_dim}")
 
-    # Initialize DQN agent
-    agent = DQNAgent(
+    # Initialize SAC agent
+    agent = SACAgent(
         state_dim=state_dim,
         action_dim=action_dim,
         learning_rate=args.lr,
@@ -78,8 +78,6 @@ def train(args):
         epsilon_decay=args.epsilon_decay,
         buffer_size=args.buffer_size,
         batch_size=args.batch_size,
-        target_update_freq=args.target_update,
-        min_replay_size=args.min_replay,
     )
 
     # Load checkpoint if specified
@@ -154,14 +152,14 @@ def train(args):
         # Save checkpoint
         if episode % args.save_interval == 0:
             checkpoint_path = os.path.join(
-                CHECKPOINT_DIR, f'dqn_ep{episode}.pt'
+                CHECKPOINT_DIR, f'sac_ep{episode}.pt'
             )
             agent.save(checkpoint_path)
 
             # Save best model
             if avg_reward_100 > best_avg_reward:
                 best_avg_reward = avg_reward_100
-                best_path = os.path.join(CHECKPOINT_DIR, 'dqn_best.pt')
+                best_path = os.path.join(CHECKPOINT_DIR, 'sac_best.pt')
                 agent.save(best_path)
                 print(f"  ★ New best avg reward: {best_avg_reward:.3f}")
 
@@ -177,7 +175,7 @@ def train(args):
     print(f"  Buffer size:    {len(agent.replay_buffer)}")
 
     # Save final model
-    final_path = os.path.join(CHECKPOINT_DIR, 'dqn_final.pt')
+    final_path = os.path.join(CHECKPOINT_DIR, 'sac_final.pt')
     agent.save(final_path)
 
     # Save training results
@@ -202,7 +200,7 @@ def train(args):
 
 def evaluate(args):
     """
-    Evaluate a trained DQN agent.
+    Evaluate a trained SAC agent.
 
     Loads a checkpoint and runs evaluation episodes (no exploration).
     """
@@ -214,9 +212,9 @@ def evaluate(args):
     state_dim = env.observation_space.shape[0]
     action_dim = env.action_space.n
 
-    agent = DQNAgent(state_dim=state_dim, action_dim=action_dim)
+    agent = SACAgent(state_dim=state_dim, action_dim=action_dim)
 
-    checkpoint_path = os.path.join(CHECKPOINT_DIR, args.load or 'dqn_best.pt')
+    checkpoint_path = os.path.join(CHECKPOINT_DIR, args.load or 'sac_best.pt')
     if os.path.exists(checkpoint_path):
         agent.load(checkpoint_path)
     else:

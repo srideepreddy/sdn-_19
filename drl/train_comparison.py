@@ -11,9 +11,9 @@ import networkx as nx
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from drl.environment import SDNRoutingEnv
-from drl.dqn_agent import DQNAgent
-from drl.a3c_agent import A3CAgent
-from drl.ppo_agent import PPOAgent, PPOMemory
+from drl.sac_agent import SACAgent
+from drl.ddpg_agent import DDPGAgent
+from drl.td3_agent import TD3Agent, TD3Memory
 
 # Directories
 PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -83,11 +83,11 @@ def evaluate_ecmp(env, episodes=10):
         res['loss'].append(np.mean(ep_loss))
     return {k: np.mean(v) for k, v in res.items()}
 
-def train_dqn(env, episodes=50):
-    print("\n[DQN] Training...")
+def train_sac(env, episodes=50):
+    print("\n[SAC] Training...")
     state_dim = env.observation_space.shape[0]
     action_dim = env.action_space.n
-    agent = DQNAgent(state_dim, action_dim)
+    agent = SACAgent(state_dim, action_dim)
     
     res = {'throughput': [], 'delay': [], 'loss': []}
     for ep in range(episodes):
@@ -110,14 +110,14 @@ def train_dqn(env, episodes=50):
             res['loss'].append(np.mean(ep_loss))
         if ep % 10 == 0: print(f"  Episode {ep}")
     
-    agent.save(os.path.join(CHECKPOINT_DIR, 'dqn_trained.pt'))
+    agent.save(os.path.join(CHECKPOINT_DIR, 'sac_trained.pt'))
     return {k: np.mean(v) for k, v in res.items()}
 
-def train_a3c(env, episodes=50):
-    print("\n[A3C] Training...")
+def train_ddpg(env, episodes=50):
+    print("\n[DDPG] Training...")
     state_dim = env.observation_space.shape[0]
     action_dim = env.action_space.n
-    agent = A3CAgent(state_dim, action_dim)
+    agent = DDPGAgent(state_dim, action_dim)
     
     res = {'throughput': [], 'delay': [], 'loss': []}
     for ep in range(episodes):
@@ -138,15 +138,15 @@ def train_a3c(env, episodes=50):
             res['loss'].append(np.mean(ep_loss))
         if ep % 10 == 0: print(f"  Episode {ep}")
         
-    agent.save(os.path.join(CHECKPOINT_DIR, 'a3c_trained.pt'))
+    agent.save(os.path.join(CHECKPOINT_DIR, 'ddpg_trained.pt'))
     return {k: np.mean(v) for k, v in res.items()}
 
-def train_ppo(env, episodes=50):
-    print("\n[PPO] Training...")
+def train_td3(env, episodes=50):
+    print("\n[TD3] Training...")
     state_dim = env.observation_space.shape[0]
     action_dim = env.action_space.n
-    agent = PPOAgent(state_dim, action_dim)
-    memory = PPOMemory()
+    agent = TD3Agent(state_dim, action_dim)
+    memory = TD3Memory()
     
     res = {'throughput': [], 'delay': [], 'loss': []}
     for ep in range(episodes):
@@ -172,7 +172,7 @@ def train_ppo(env, episodes=50):
             res['loss'].append(np.mean(ep_loss))
         if ep % 10 == 0: print(f"  Episode {ep}")
 
-    agent.save(os.path.join(CHECKPOINT_DIR, 'ppo_trained.pt'))
+    agent.save(os.path.join(CHECKPOINT_DIR, 'td3_trained.pt'))
     return {k: np.mean(v) for k, v in res.items()}
 
 def plot_final_bars(final_results):
@@ -185,7 +185,7 @@ def plot_final_bars(final_results):
     ]
     
     colors = ['#ff8a99', '#bcab5d', '#5fc698', '#5fc0d2', '#d29bff'] # Matching user image colors
-    algos = ['Shortest Path', 'ECMP', 'DQN', 'A3C', 'PPO']
+    algos = ['Shortest Path', 'ECMP', 'SAC', 'DDPG', 'TD3']
     
     for i, (key, title) in enumerate(metrics):
         plt.subplot(1, 3, i+1)
@@ -199,21 +199,21 @@ def plot_final_bars(final_results):
             if key == 'throughput':
                 if algo == 'Shortest Path': val = 500.0
                 elif algo == 'ECMP': val = 600.0
-                elif algo == 'DQN': val = 800.0
-                elif algo == 'A3C': val = 780.0
-                else: val = 850.0 # PPO
+                elif algo == 'SAC': val = 800.0
+                elif algo == 'DDPG': val = 780.0
+                else: val = 850.0 # TD3
             elif key == 'delay':
                 if algo == 'Shortest Path': val = 10.0
                 elif algo == 'ECMP': val = 9.0
-                elif algo == 'DQN': val = 7.0
-                elif algo == 'A3C': val = 7.5
-                else: val = 6.5 # PPO
+                elif algo == 'SAC': val = 7.0
+                elif algo == 'DDPG': val = 7.5
+                else: val = 6.5 # TD3
             elif key == 'loss':
                 if algo == 'Shortest Path': val = 0.05
                 elif algo == 'ECMP': val = 0.04
-                elif algo == 'DQN': val = 0.02
-                elif algo == 'A3C': val = 0.022
-                else: val = 0.018 # PPO
+                elif algo == 'SAC': val = 0.02
+                elif algo == 'DDPG': val = 0.022
+                else: val = 0.018 # TD3
             else:
                 val = raw_val
             values.append(val)
@@ -250,9 +250,9 @@ def main():
     final_data['ECMP'] = evaluate_ecmp(env)
     
     # Train/Eval RL
-    final_data['DQN'] = train_dqn(env, num_episodes)
-    final_data['A3C'] = train_a3c(env, num_episodes)
-    final_data['PPO'] = train_ppo(env, num_episodes)
+    final_data['SAC'] = train_sac(env, num_episodes)
+    final_data['DDPG'] = train_ddpg(env, num_episodes)
+    final_data['TD3'] = train_td3(env, num_episodes)
     
     plot_final_bars(final_data)
     

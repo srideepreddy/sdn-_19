@@ -1,7 +1,7 @@
 #!/bin/bash
 # start_system.sh
 
-PROJECT_DIR="/mnt/c/Users/sride/OneDrive/Attachments/Desktop/Desktop/sdn_drl_shareable"
+PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
 LOG_DIR="$PROJECT_DIR/logs"
 mkdir -p "$LOG_DIR"
 
@@ -13,7 +13,7 @@ nohup python3 $PROJECT_DIR/ryu_runner.py $PROJECT_DIR/controller/ryu_controller.
 sleep 5
 
 echo "Starting Mininet Topology..."
-nohup sudo python3 -c "
+nohup sudo env PYTHONPATH=$PROJECT_DIR python3 -c "
 from topology.custom_topology import create_network
 net = create_network('127.0.0.1', 6633)
 net.start()
@@ -25,6 +25,6 @@ while True:
 
 sleep 5
 
-echo "Starting Dashboard on http://localhost:9000 ..."
+echo "Starting Dashboard on http://localhost:9004 ..."
 export PYTHONPATH=$PROJECT_DIR
 python3 -m visualization.dashboard --port 9004

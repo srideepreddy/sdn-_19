@@ -1,13 +1,13 @@
 # Collaborative Routing in SDN using Deep Reinforcement Learning
 
-A research project implementing intelligent routing in Software-Defined Networks using a Deep Q-Network (DQN) agent, with real-time visualization.
+A research project implementing intelligent routing in Software-Defined Networks using Deep Reinforcement Learning agents (SAC, DDPG, TD3), with real-time visualization.
 
 ## Architecture
 
 ```
 ┌─────────────┐     ┌──────────────┐     ┌─────────────┐
 │   Mininet    │◄───►│     Ryu      │◄───►│  DRL Agent  │
-│  Topology    │     │  Controller  │     │   (DQN)     │
+│  Topology    │     │  Controller  │     │   (SAC)     │
 │  4sw + 6host │     │  OpenFlow1.3 │     │  PyTorch    │
 └─────────────┘     └──────┬───────┘     └──────┬──────┘
                            │                     │
@@ -30,7 +30,7 @@ sdn_drl_routing/
 │   └── stats_collector.py    # Collects stats → data/net_stats.json
 ├── drl/
 │   ├── environment.py        # Gym-compatible RL environment
-│   ├── dqn_agent.py          # DQN with replay buffer + target network
+│   ├── sac_agent.py          # SAC with twin Q-networks + entropy regularization
 │   └── train.py              # Training script (simulation or live)
 ├── visualization/
 │   ├── dashboard.py          # Flask web dashboard (auto-refresh)
@@ -127,7 +127,7 @@ python3 -m visualization.dashboard --port 5000
 | **State** | Per-link: utilization, delay, packet count, bandwidth (normalized) |
 | **Action** | Select path index from K candidate paths |
 | **Reward** | `R = throughput - 0.5×delay - 0.3×packet_loss` |
-| **Algorithm** | DQN with target network, experience replay (50K buffer) |
+| **Algorithm** | SAC with twin Q-networks, entropy regularization, auto temperature |
 | **Exploration** | ε-greedy: 1.0 → 0.01 (decay 0.995/episode) |
 
 ## Testing

@@ -1,0 +1,130 @@
+[SACAgent] Initialized on cpu
+  State dim: 48, Action dim: 10
+  Policy params: 24,586
+======================================================================
+  END-TO-END MATHEMATICAL VERIFICATION
+  Backend vs Frontend vs Manual Calculation
+======================================================================
+
+[STEP 1] Loading DRL Agents...
+[SACAgent] Initialized on cpu
+  State dim: 48, Action dim: 10
+  Policy params: 24,586
+  Loaded: ['sac', 'ddpg', 'td3']
+
+[STEP 2] Building State Vector (Input to all agents)...
+  State dim = 48  (expected: 48)
+
+[STEP 3] Candidate Paths (h1 -> h6)...
+  Action 0: s1 -> s4
+  Action 1: s1 -> s2 -> s4
+  Action 2: s1 -> s3 -> s4
+  Action 3: s1 -> s2 -> s3 -> s4
+  Action 4: s1 -> s3 -> s2 -> s4
+  Action 5: s1 -> s4
+  Action 6: s1 -> s4
+  Action 7: s1 -> s4
+  Action 8: s1 -> s4
+  Action 9: s1 -> s4
+
+[STEP 4] Using Zero-Utilization Baseline for Clean Math Proof
+  (All links util = 0.0 for deterministic comparison)
+
+[STEP 5] Calculating Metrics for ALL Candidate Paths
+======================================================================
+
+  Path 0: s1 -> s4
+  ----------------------------------------------------------
+  Hand Calculation Steps:
+    s1->s4: 5 * (1 + 0.000 * 3) = 5.0000
+  
+  Metric          | Manual       | Frontend     | Backend      | Status
+  ----------------+--------------+--------------+--------------+-----------
+  Delay (ms)      | 5.0000       | 5.0000       | 5.0000       | OK
+  Throughput      | 50.00        | 50.00        | 50.00        | OK
+  Loss (%)        | 0.0000       | 0.0000       | 0.0000       | OK
+  RESULT: [MATCH]
+
+  Path 1: s1 -> s2 -> s4
+  ----------------------------------------------------------
+  Hand Calculation Steps:
+    s1->s2: 2 * (1 + 0.000 * 3) = 2.0000
+    s2->s4: 10 * (1 + 0.000 * 3) = 10.0000
+  
+  Metric          | Manual       | Frontend     | Backend      | Status
+  ----------------+--------------+--------------+--------------+-----------
+  Delay (ms)      | 12.0000      | 12.0000      | 12.0000      | OK
+  Throughput      | 10.00        | 10.00        | 10.00        | OK
+  Loss (%)        | 0.0000       | 0.0000       | 0.0000       | OK
+  RESULT: [MATCH]
+
+  Path 2: s1 -> s3 -> s4
+  ----------------------------------------------------------
+  Hand Calculation Steps:
+    s1->s3: 10 * (1 + 0.000 * 3) = 10.0000
+    s3->s4: 2 * (1 + 0.000 * 3) = 2.0000
+  
+  Metric          | Manual       | Frontend     | Backend      | Status
+  ----------------+--------------+--------------+--------------+-----------
+  Delay (ms)      | 12.0000      | 12.0000      | 12.0000      | OK
+  Throughput      | 10.00        | 10.00        | 10.00        | OK
+  Loss (%)        | 0.0000       | 0.0000       | 0.0000       | OK
+  RESULT: [MATCH]
+
+  Path 3: s1 -> s2 -> s3 -> s4
+  ----------------------------------------------------------
+  Hand Calculation Steps:
+    s1->s2: 2 * (1 + 0.000 * 3) = 2.0000
+    s2->s3: 5 * (1 + 0.000 * 3) = 5.0000
+    s3->s4: 2 * (1 + 0.000 * 3) = 2.0000
+  
+  Metric          | Manual       | Frontend     | Backend      | Status
+  ----------------+--------------+--------------+--------------+-----------
+  Delay (ms)      | 9.0000       | 9.0000       | 9.0000       | OK
+  Throughput      | 50.00        | 50.00        | 50.00        | OK
+  Loss (%)        | 0.0000       | 0.0000       | 0.0000       | OK
+  RESULT: [MATCH]
+
+  Path 4: s1 -> s3 -> s2 -> s4
+  ----------------------------------------------------------
+  Hand Calculation Steps:
+    s1->s3: 10 * (1 + 0.000 * 3) = 10.0000
+    s3->s2: 5 * (1 + 0.000 * 3) = 5.0000
+    s2->s4: 10 * (1 + 0.000 * 3) = 10.0000
+  
+  Metric          | Manual       | Frontend     | Backend      | Status
+  ----------------+--------------+--------------+--------------+-----------
+  Delay (ms)      | 25.0000      | 25.0000      | 25.0000      | OK
+  Throughput      | 10.00        | 10.00        | 10.00        | OK
+  Loss (%)        | 0.0000       | 0.0000       | 0.0000       | OK
+  RESULT: [MATCH]
+
+======================================================================
+  [STEP 6] MATHEMATICAL OPTIMAL PATH
+======================================================================
+  Best Path (by lowest delay):  s1 -> s4
+    Delay:      5.0000 ms
+    Throughput: 50.00 Mbps
+    Loss:       0.0000 %
+
+======================================================================
+  [STEP 7] DRL AGENT SELECTIONS vs OPTIMAL
+======================================================================
+
+  Algorithm  | Action  | Selected Path                  | Delay      | Throughput   | Loss       | Optimal?
+  -----------+---------+--------------------------------+------------+--------------+------------+-----------
+  SAC        | 1       | s1 -> s2 -> s4                 | 12.0000    | 10.00        | 0.0000     | NEAR
+  DDPG       | 6       | s1 -> s4                       | 5.0000     | 50.00        | 0.0000     | YES
+  TD3        | 3       | s1 -> s2 -> s3 -> s4           | 9.0000     | 50.00        | 0.0000     | NEAR
+
+======================================================================
+  FINAL VERIFICATION SUMMARY
+======================================================================
+  Backend == Frontend == Manual?  YES -- ALL MATCH
+  Total paths verified:           5
+  Mathematically optimal path:    s1 -> s4
+  Formulas verified:
+    Delay:      D = SUM( delay_i * (1 + 3 * util_i) )
+    Throughput: T = min(1.0, MinBW / 100) * 100
+    Loss:       L = MaxUtil^2 * 10.0
+======================================================================

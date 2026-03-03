@@ -13,6 +13,7 @@ import time
 import random
 import threading
 import networkx as nx
+import numpy as np
 from flask import Flask, render_template_string, jsonify, request, redirect
 from flasgger import Swagger
 
@@ -21,9 +22,9 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from visualization.net_graph import render_topology
 from controller.stats_collector import read_stats, STATS_FILE
 try:
-    from drl.dqn_agent import DQNAgent
-    from drl.a3c_agent import A3CAgent
-    from drl.ppo_agent import PPOAgent
+    from drl.sac_agent import SACAgent
+    from drl.ddpg_agent import DDPGAgent
+    from drl.td3_agent import TD3Agent
     HAS_DRL = True
 except ImportError:
     print("[Dashboard] Warning: DRL dependencies (like torch) not found. Intelligent routing will be disabled.")
@@ -39,13 +40,16 @@ app_state = {
     'selected_src': None,
     'selected_dst': None,
     'current_path': [],
-    'routing_mode': 'shortest',   # Start with shortest path
-    'drl_algorithm': 'dqn',       # Default DRL algorithm
+    'routing_mode': 'drl',        # Start with DRL
+    'drl_algorithm': 'sac',       # Default DRL algorithm
     'packet_log': [],
     'packet_counter': 0,
     'continuous_send': False,
     'agents': {} # Store initialized agents here
 }
+
+# Global var to share port with Swagger redirect
+DASHBOARD_PORT = 9000
 
 # Swagger Configuration for Main App (Port 9000)
 swagger_config = {
@@ -69,7 +73,10 @@ swagger_ui_app = Flask("SwaggerUI")
 
 @swagger_ui_app.route('/')
 def swagger_ui_index():
-    return redirect("http://localhost:9000/apidocs/")
+    # Placeholder, will be patched at runtime or we can use a relative link if possible
+    # But since it's a separate app, we need the dashboard port.
+    # We'll use a global or pass it in.
+    return redirect(f"http://localhost:{DASHBOARD_PORT}/apidocs/")
 
 # Initialize and Load Trained Agents
 def init_agents():
@@ -81,16 +88,16 @@ def init_agents():
     action_dim = 10
     
     try:
-        dqn = DQNAgent(state_dim, action_dim)
-        dqn.load(os.path.join(CHECKPOINT_DIR, 'dqn_trained.pt'))
+        sac = SACAgent(state_dim, action_dim)
+        sac.load(os.path.join(CHECKPOINT_DIR, 'sac_trained.pt'))
         
-        a3c = A3CAgent(state_dim, action_dim)
-        a3c.load(os.path.join(CHECKPOINT_DIR, 'a3c_trained.pt'))
+        ddpg = DDPGAgent(state_dim, action_dim)
+        ddpg.load(os.path.join(CHECKPOINT_DIR, 'ddpg_trained.pt'))
         
-        ppo = PPOAgent(state_dim, action_dim)
-        ppo.load(os.path.join(CHECKPOINT_DIR, 'ppo_trained.pt'))
+        td3 = TD3Agent(state_dim, action_dim)
+        td3.load(os.path.join(CHECKPOINT_DIR, 'td3_trained.pt'))
         
-        app_state['agents'] = {'dqn': dqn, 'a3c': a3c, 'ppo': ppo}
+        app_state['agents'] = {'sac': sac, 'ddpg': ddpg, 'td3': td3}
     except Exception as e:
         print(f"[Dashboard] Error loading agents: {e}")
 
@@ -184,58 +191,181 @@ def build_graph(disabled_links=None):
         G.add_edge(h, sw, bw=1000, delay=1, weight=1)
     return G
 
-def compute_drl_path(src, dst, disabled):
-    G = build_graph(disabled)
-    if not G.has_node(src) or not G.has_node(dst):
-        return [], "Invalid hosts"
-    try:
-        all_paths = list(nx.all_simple_paths(G, src, dst, cutoff=8))
-    except nx.NetworkXNoPath:
-        return [], "No path exists (links broken)"
-    if not all_paths:
-        return [], "No path exists (links broken)"
+def get_drl_state():
+    """Construct state vector exactly like drl/environment.py."""
     stats = read_stats()
     link_stats = stats.get('link_stats', {})
-    algo = app_state.get('drl_algorithm', 'dqn')
-    best_path, best_score = None, float('inf')
+    G = build_graph()
     
-    # Simulate different heuristic behaviors for different algorithms
-    # In a real system, we would load the torch model and run inference.
-    # Here we adjust the scoring weights to simulate different learning outcomes.
+    # Environment uses switch IDs 1-4 and host IDs 5-10
+    # Dashboard uses s1-s4 and h1-h6. We need to map them to match the model.
+    sw_map = {'s1': 1, 's2': 2, 's3': 3, 's4': 4}
+    host_map = {'h1': 5, 'h2': 6, 'h3': 7, 'h4': 8, 'h5': 9, 'h6': 10}
     
-    for path in all_paths:
-        score = 0
-        for i in range(len(path) - 1):
-            u, v = path[i], path[i + 1]
-            if G.has_edge(u, v):
-                edge = G.edges[u, v]
-                delay = edge.get('delay', 1)
-                bw = edge.get('bw', 100)
-                lk, ak = f"{u}-{v}", f"{v}-{u}"
-                ls = link_stats.get(lk, link_stats.get(ak, {}))
-                util = ls.get('utilization', random.uniform(0, 0.3))
-                
-                if algo == 'dqn':
-                    # DQN focuses on minimizing delay + congestion
-                    score += (delay * (1 + util * 5)) / (bw / 100)
-                elif algo == 'a3c':
-                    # A3C focuses on load balancing (minimizing max utilization)
-                    score += (util * 10) + (delay * 0.5)
-                elif algo == 'ppo':
-                    # PPO focuses on stability and throughput
-                    score += (delay * 2) + (1 / (bw / 100)) + (util * 2)
-                    
-        # If we have a trained agent, let it "influence" or pick the path index
-        # For simplicity in this demo, we use the heuristics which are now "tuned" 
-        # to match the expected outcome of the agents, but we could also run inference:
-        # e.g., agent = app_state['agents'].get(algo)
-        # index = agent.select_action(state, training=False)
-        # best_path = all_paths[index % len(all_paths)]
+    # Get edge list as expected by environment (12 edges)
+    # environment.py link_list: [(5, 1), (6, 1), (7, 2), (8, 3), (9, 4), (10, 4), (1, 2), (3, 4), (1, 4), (2, 3), (1, 3), (2, 4)]
+    edges = [
+        (5, 1), (6, 1), (7, 2), (8, 3), (9, 4), (10, 4), # Hosts
+        (1, 2), (3, 4), (1, 4), (2, 3), (1, 3), (2, 4)  # Switches
+    ]
+    
+    mapping = {**sw_map, **host_map}
+    rev_mapping = {v: k for k, v in mapping.items()}
+    
+    state = []
+    for u_id, v_id in edges:
+        u_name, v_name = rev_mapping[u_id], rev_mapping[v_id]
+        link_key = f"{u_name}-{v_name}"
+        alt_key = f"{v_name}-{u_name}"
+        ls = link_stats.get(link_key, link_stats.get(alt_key, {}))
         
-        if score < best_score:
-            best_score = score
-            best_path = path
-    return best_path or [], ""
+        util = ls.get('utilization', 0.0)
+        bw_kbps = ls.get('bandwidth_mbps', 100 if u_id < 5 and v_id < 5 else 1000)
+        # Normalize as in environment.py
+        # Environment uses 100/50/10 for switches, 1000 for hosts.
+        # It normalizes by dividing by 1000.
+        bw_norm = bw_kbps / 1000.0
+        
+        # tx_bps normalization: environment uses min(1.0, tx_bps / 1e9)
+        tx_bps = ls.get('tx_bps', 0)
+        tx_norm = min(1.0, tx_bps / 1e9)
+        
+        # Delay: env uses 0.0 in live mode? (checked environment.py:260) 
+        # Actually it uses min(1.0, tx), 0.0, min(1.0, bw)
+        state.extend([
+            min(1.0, util),
+            min(1.0, tx_norm),
+            0.0, # Packet count placeholder in live mode
+            min(1.0, bw_norm),
+        ])
+        
+    return np.array(state, dtype=np.float32)
+
+def get_candidate_paths(src, dst):
+    """Generate candidate paths exactly like drl/environment.py."""
+    G = build_graph()
+    try:
+        all_paths = list(nx.all_simple_paths(G, src, dst, cutoff=6))
+        # Env filters to switch-only paths (if src/dst are switches)
+        # But here src/dst are hosts. We need the switch segment.
+        switch_paths = []
+        for p in all_paths:
+            # Extract switch sequence: e.g., ['h1', 's1', 's2', 'h3'] -> ['s1', 's2']
+            sp = [n for n in p if n.startswith('s')]
+            if len(sp) >= 2 and sp not in switch_paths:
+                switch_paths.append(sp)
+        
+        switch_paths.sort(key=len)
+        candidates = switch_paths[:10]
+        
+        # Pad to 10
+        while len(candidates) < 10:
+            if candidates:
+                candidates.append(candidates[0])
+            else:
+                # Fallback if no paths
+                candidates.append([])
+        return candidates
+    except nx.NetworkXNoPath:
+        return [[]]*10
+
+def evaluate_path(path_switches, link_stats):
+    """Score a switch path using the same formulas as environment.py.
+    Returns (delay, throughput, loss, composite_score).
+    Lower composite_score = better path.
+    """
+    if not path_switches or len(path_switches) < 2:
+        return 999.0, 0.0, 100.0, 999.0
+    
+    G = build_graph()
+    total_delay = 0.0
+    max_utilization = 0.0
+    min_bandwidth = float('inf')
+    
+    for i in range(len(path_switches) - 1):
+        u, v = path_switches[i], path_switches[i+1]
+        if G.has_edge(u, v):
+            edge_data = G.edges[u, v]
+            d = edge_data.get('delay', 1)
+            b = edge_data.get('bw', 100)
+            
+            lk, ak = f"{u}-{v}", f"{v}-{u}"
+            ls = link_stats.get(lk, link_stats.get(ak, {}))
+            util = ls.get('utilization', 0.0)
+            
+            total_delay += d * (1 + util * 3)
+            max_utilization = max(max_utilization, util)
+            min_bandwidth = min(min_bandwidth, b)
+    
+    throughput = min(1.0, min_bandwidth / 100.0) * 100.0
+    loss = (max_utilization ** 2) * 10.0
+    
+    # Composite score (same weights as environment.py reward, lower = better)
+    # R = w1*throughput - w2*delay - w3*loss  =>  score = -R (minimize)
+    score = -(1.0 * min(1.0, min_bandwidth / 100.0)
+              - 0.5 * min(1.0, total_delay / 50.0)
+              - 0.3 * (max_utilization ** 2))
+    
+    return total_delay, throughput, loss, score
+
+
+def compute_drl_path(src, dst, disabled):
+    """Run ALL 3 DRL agents, compare their outputs, and select the best path."""
+    if not HAS_DRL:
+        return [], "DRL dependencies not found"
+    
+    agents = app_state.get('agents', {})
+    if not agents:
+        return [], "No agents initialized"
+    
+    state = get_drl_state()
+    candidates = get_candidate_paths(src, dst)
+    stats = read_stats()
+    link_stats = stats.get('link_stats', {})
+    
+    # Run all agents and evaluate each selected path
+    results = []
+    for algo_name in ['sac', 'ddpg', 'td3']:
+        agent = agents.get(algo_name)
+        if not agent:
+            continue
+        
+        # Handle inconsistent select_action signatures
+        if algo_name == 'td3':
+            action = agent.select_action(state)
+        else:
+            action = agent.select_action(state, training=False)
+        
+        path_sw = candidates[action]
+        delay, throughput, loss, score = evaluate_path(path_sw, link_stats)
+        
+        results.append({
+            'algo': algo_name,
+            'action': action,
+            'path': path_sw,
+            'delay': delay,
+            'throughput': throughput,
+            'loss': loss,
+            'score': score,
+        })
+    
+    if not results:
+        return [], "No agents available"
+    
+    # Pick the best path (lowest composite score)
+    best = min(results, key=lambda r: r['score'])
+    
+    # Store comparison info for the UI
+    app_state['drl_comparison'] = results
+    app_state['drl_winner'] = best['algo']
+    app_state['drl_algorithm'] = best['algo']  # Update active algorithm to winner
+    
+    if not best['path']:
+        return [], "No path found by any agent"
+    
+    full_path = [src] + best['path'] + [dst]
+    return full_path, ""
+
 
 def compute_shortest_path(src, dst, disabled):
     G = build_graph(disabled)
@@ -287,16 +417,42 @@ def update_stats_file(path, disabled_links):
         }
     stats['link_stats'] = link_stats
     # ... rest of the function ...
-    perf = stats.get('performance', {'delay': [], 'packet_loss': [], 'throughput': []})
+    # Calculate performance metrics using formulas from drl/environment.py
+    total_delay = 0.0
+    max_utilization = 0.0
+    min_bandwidth = float('inf')
+    
     if path:
-        d = round(random.uniform(4, 8), 1) if len(switch_path) <= 3 else round(random.uniform(8, 15), 1)
-        l = round(random.uniform(0.002, 0.01), 4)
-        t = round(random.uniform(70, 95), 1) if len(switch_path) <= 3 else round(random.uniform(40, 65), 1)
+        G = build_graph()
+        # Filter switches from path
+        sw_path = [n for n in path if n.startswith('s')]
+        for i in range(len(sw_path) - 1):
+            u, v = sw_path[i], sw_path[i+1]
+            if G.has_edge(u, v):
+                edge_data = G.edges[u, v]
+                d = edge_data.get('delay', 1)
+                b = edge_data.get('bw', 100)
+                
+                lk, ak = f"{u}-{v}", f"{v}-{u}"
+                ls = link_stats.get(lk, link_stats.get(ak, {}))
+                util = ls.get('utilization', 0.0)
+                
+                total_delay += d * (1 + util * 3)
+                max_utilization = max(max_utilization, util)
+                min_bandwidth = min(min_bandwidth, b)
+        
+        # Matching drl/environment.py:354-368
+        t_val = min(1.0, min_bandwidth / 100.0) * 100.0
+        d_val = total_delay
+        l_val = (max_utilization ** 2) * 10.0
     else:
-        d, l, t = round(random.uniform(15, 30), 1), round(random.uniform(0.05, 0.15), 4), round(random.uniform(10, 30), 1)
-    perf['delay'] = (perf.get('delay', []) + [d])[-50:]
-    perf['packet_loss'] = (perf.get('packet_loss', []) + [l])[-50:]
-    perf['throughput'] = (perf.get('throughput', []) + [t])[-50:]
+        d_val, l_val, t_val = 50.0, 10.0, 0.0
+
+    perf = stats.get('performance', {'delay': [], 'packet_loss': [], 'throughput': []})
+    perf['delay'] = (perf.get('delay', []) + [round(d_val, 2)])[-50:]
+    perf['packet_loss'] = (perf.get('packet_loss', []) + [round(l_val, 4)])[-50:]
+    perf['throughput'] = (perf.get('throughput', []) + [round(t_val, 2)])[-50:]
+    
     stats['performance'] = perf
     stats['timestamp'] = time.time()
     with open(STATS_FILE, 'w') as f:
@@ -401,6 +557,13 @@ DASHBOARD_HTML = r"""
         .mode-sw{display:flex;background:var(--bg-input);border:1px solid var(--border);border-radius:var(--rs);padding:3px;gap:3px;margin-bottom:10px;}
         .mode-b{flex:1;padding:6px 0;border:none;border-radius:6px;font-family:'Inter';font-size:11px;font-weight:600;cursor:pointer;background:transparent;color:var(--t3);transition:all .25s;}
         .mode-b.active{background:var(--blue);color:#fff;box-shadow:0 2px 8px rgba(79,110,247,.3);}
+        .algo-picker{margin-bottom:10px;animation:fadeSlide .3s ease;}
+        @keyframes fadeSlide{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:translateY(0)}}
+        .algo-btns{display:flex;gap:5px;}
+        .algo-b{flex:1;padding:8px 4px;border:1px solid var(--border);border-radius:var(--rs);font-family:'Inter';font-size:11px;font-weight:600;cursor:pointer;background:var(--bg-input);color:var(--t3);transition:all .25s;display:flex;flex-direction:column;align-items:center;gap:3px;}
+        .algo-b:hover{border-color:var(--blue);color:var(--t1);}
+        .algo-b.active{background:linear-gradient(135deg,rgba(79,110,247,.15),rgba(34,211,238,.1));border-color:var(--blue);color:var(--blue-l);box-shadow:0 2px 10px rgba(79,110,247,.2);}
+        .algo-icon{font-size:14px;}
         .btn{width:100%;padding:9px;border:none;border-radius:var(--rs);font-family:'Inter';font-size:12px;font-weight:700;cursor:pointer;transition:all .2s;}
         .btn-p{background:linear-gradient(135deg,var(--blue),#3b52d4);color:#fff;box-shadow:0 4px 14px rgba(79,110,247,.2);}
         .btn-p:hover{transform:translateY(-1px);box-shadow:0 6px 20px rgba(79,110,247,.3);}
@@ -571,8 +734,22 @@ DASHBOARD_HTML = r"""
                 </select>
             </div>
             <div class="mode-sw">
-                <button class="mode-b" id="mode-drl" onclick="setMode('drl')">DRL Agent</button>
-                <button class="mode-b active" id="mode-sp" onclick="setMode('shortest')">Shortest Path</button>
+                <button class="mode-b active" id="mode-drl" onclick="setMode('drl')">DRL Agent</button>
+                <button class="mode-b" id="mode-sp" onclick="setMode('shortest')">Shortest Path</button>
+            </div>
+            <div class="fg algo-picker" id="algo-picker">
+                <label>DRL Algorithm</label>
+                <div class="algo-btns">
+                    <button class="algo-b active" id="algo-sac" onclick="pickAlgo('sac')">
+                        <span class="algo-icon">🔥</span> SAC
+                    </button>
+                    <button class="algo-b" id="algo-ddpg" onclick="pickAlgo('ddpg')">
+                        <span class="algo-icon">⚡</span> DDPG
+                    </button>
+                    <button class="algo-b" id="algo-td3" onclick="pickAlgo('td3')">
+                        <span class="algo-icon">🎯</span> TD3
+                    </button>
+                </div>
             </div>
             <button class="btn btn-p" id="route-btn" onclick="computeRoute()" disabled>Compute Route</button>
         </div>
@@ -619,7 +796,8 @@ DASHBOARD_HTML = r"""
 
         <div class="sec">
             <div class="sec-title">◎ Status</div>
-            <div class="sr"><span class="l">Algorithm</span><span id="status-mode" class="badge badge-info">SPF</span></div>
+            <div class="sr"><span class="l">Algorithm</span><span id="status-mode" class="badge badge-info">DRL</span></div>
+            <div class="sr" id="status-algo-row"><span class="l">DRL Agent</span><span id="status-algo" class="badge badge-warn">SAC</span></div>
             <div class="sr"><span class="l">Links</span><span class="v" id="status-links">6 / 6</span></div>
             <div class="sr"><span class="l">Hops</span><span class="v" id="status-hops">—</span></div>
         </div>
@@ -860,10 +1038,26 @@ DASHBOARD_HTML = r"""
             document.getElementById('mode-sp').classList.toggle('active',m==='shortest');
             document.getElementById('status-mode').textContent=m==='drl'?'DRL':'SPF';
             document.getElementById('status-mode').className=m==='drl'?'badge badge-warn':'badge badge-info';
+            // Show/hide algorithm picker and status row
+            const picker = document.getElementById('algo-picker');
+            const algoRow = document.getElementById('status-algo-row');
+            if(picker) picker.style.display = m==='drl' ? 'block' : 'none';
+            if(algoRow) algoRow.style.display = m==='drl' ? 'flex' : 'none';
             if(!silent){
                 const s=document.getElementById('src-host').value,d=document.getElementById('dst-host').value;
                 if(s&&d&&s!==d)computeRoute();
             }
+        }
+
+        function pickAlgo(algoId) {
+            // Update button states
+            document.querySelectorAll('.algo-b').forEach(b => b.classList.remove('active'));
+            document.getElementById('algo-' + algoId).classList.add('active');
+            // Update status badge
+            const badge = document.getElementById('status-algo');
+            if(badge) badge.textContent = algoId.toUpperCase();
+            // Call backend
+            switchAlgorithm(algoId);
         }
 
         document.getElementById('src-host').addEventListener('change',chk);
@@ -880,7 +1074,7 @@ DASHBOARD_HTML = r"""
             const s=document.getElementById('src-host').value,d=document.getElementById('dst-host').value;
             if(!s||!d||s===d)return;
             const btn=document.getElementById('route-btn');btn.textContent='Computing...';btn.disabled=true;
-            fetch('/api/route',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({src:s,dst:d,mode:'shortest'})})
+            fetch('/api/route',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({src:s,dst:d,mode:routingMode})})
             .then(r=>r.json()).then(data=>{
                 btn.textContent='Compute Route';btn.disabled=false;
                 if(data.path?.length){
@@ -1152,7 +1346,7 @@ def api_set_topology():
 @app.route('/api/set_algorithm', methods=['POST'])
 def api_set_algorithm():
     algo = request.get_json().get('algorithm')
-    if algo not in ['dqn', 'a3c', 'ppo']:
+    if algo not in ['sac', 'ddpg', 'td3']:
         return jsonify({'error': 'Invalid algorithm'}), 400
     app_state['drl_algorithm'] = algo
     return jsonify({'status': 'ok', 'algorithm': algo})
@@ -1281,7 +1475,9 @@ def api_reset_links():
     return jsonify({'status': 'ok', 'active_links': 6})
 
 
-def start_dashboard(host='0.0.0.0', port=9000, debug=False):
+def start_dashboard(host='127.0.0.1', port=9000, debug=False):
+    global DASHBOARD_PORT
+    DASHBOARD_PORT = port
     # Start Swagger UI redirector on port 8000
     def run_swagger_ui():
         print(f"[Dashboard] Swagger UI bridge starting on http://{host}:8000")
@@ -1301,7 +1497,7 @@ def start_dashboard(host='0.0.0.0', port=9000, debug=False):
 if __name__ == '__main__':
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument('--host', default='0.0.0.0')
+    parser.add_argument('--host', default='127.0.0.1')
     parser.add_argument('--port', type=int, default=9000)
     parser.add_argument('--debug', action='store_true')
     args = parser.parse_args()
