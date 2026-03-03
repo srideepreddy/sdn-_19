@@ -1,0 +1,7 @@
+loading app /mnt/c/Users/sride/OneDrive/Attachments/Desktop/Desktop/sdn-_19/controller/ryu_controller.py
+loading app ryu.topology.switches
+loading app ryu.controller.ofp_handler
+instantiating app /mnt/c/Users/sride/OneDrive/Attachments/Desktop/Desktop/sdn-_19/controller/ryu_controller.py of DRLController
+DRL Controller initialized
+instantiating app ryu.topology.switches of Switches
+instantiating app ryu.controller.ofp_handler of OFPHandler
